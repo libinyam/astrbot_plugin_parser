@@ -118,7 +118,7 @@ class api:
 
 
     @staticmethod
-    def _blur(image_path: str | Path, output_path: str | Path | None = None, radius: int = 15) -> Path:
+    def _blur(image_path: str | Path, output_path: str | Path | None = None, radius: int = 20) -> Path:
         """对图片施加全局高斯模糊
 
         Args:
@@ -243,11 +243,25 @@ class IwaraParser(BaseParser):
         image_rating = image_info["rating"]
         image_tags = [tag["id"] for tag in image_info["tags"]]
 
+        # R18判断
+        if image_rating == "ecchi" and self.mycfg.nsfw == "ignore":
+            return self.result(
+                title=image_title,
+                extra={"info": f"⚠ 该图片为 R18 内容，已按配置忽略"},
+                url=f"https://www.iwara.tv/image/{image_id}",
+            )
+        
         # 提取图片URL列表
         image_urls = []
-        for img_item in image_info["files"]:
-            img_url = f"https://i.iwara.tv/image/original/{img_item['id']}/{img_item['name']}"
-            image_urls.append(img_url)
+        if image_rating == "ecchi" and self.mycfg.nsfw == "blur": # R18且模糊时下载压缩后的图片，省流量
+            for img_item in image_info["files"]:
+                name = Path(img_item['name']).with_suffix('.jpg').name
+                img_url = f"https://i.iwara.tv/image/large/{img_item['id']}/{name}"
+                image_urls.append(img_url)
+        else:
+            for img_item in image_info["files"]:
+                img_url = f"https://i.iwara.tv/image/original/{img_item['id']}/{img_item['name']}"
+                image_urls.append(img_url)
 
         # 作者信息
         user_name = image_info["user"]["name"]
@@ -258,14 +272,6 @@ class IwaraParser(BaseParser):
             if user_avatar
             else "https://www.iwara.tv/images/default-avatar.jpg" # iwara 默认头像
         )
-
-        # R18判断
-        if image_rating == "ecchi" and self.mycfg.nsfw == "ignore":
-            return self.result(
-                title=image_title,
-                extra={"info": f"⚠ 该图片为 R18 内容，已按配置忽略"},
-                url=f"https://www.iwara.tv/image/{image_id}",
-            )
 
         # 构建发送信息
         text = TextContent(
