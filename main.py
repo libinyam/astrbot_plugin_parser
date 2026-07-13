@@ -143,14 +143,22 @@ class ParserPlugin(Star):
 
         self_id = event.get_self_id()
 
-        # 指定机制：专门@其他bot的消息不解析。
-        # QQ 官方机器人会把 @ 当前机器人记为 qq_official，不能按普通 QQ 号比较。
+        logger.info(
+            f"[parser-adapter] incoming: umo={umo}, self_id={self_id}, "
+            f"seg1={seg1.__class__.__name__}, text={text[:300]!r}"
+        )
+
+        # Ignore messages explicitly mentioning another numeric QQ bot. QQ Official
+        # Bot uses a non-numeric mention target such as "qq_official" for itself.
         if isinstance(seg1, At):
             at_target = str(seg1.qq)
             if at_target != self_id and at_target.isdigit():
+                logger.info(
+                    f"[parser-adapter] skipped other bot mention: "
+                    f"at_target={at_target}, self_id={self_id}"
+                )
                 return
 
-        # 核心匹配逻辑 ：关键词 + 正则双重判定，汇集了所有解析器的正则对。
         keyword: str = ""
         searched: re.Match[str] | None = None
         for kw, pat in self.key_pattern_list:
@@ -160,8 +168,10 @@ class ParserPlugin(Star):
                 keyword, searched = kw, m
                 break
         if searched is None:
+            if "http" in text:
+                logger.info(f"[parser-adapter] no match: keywords={[kw for kw, _ in self.key_pattern_list]}, text={text[:300]!r}")
             return
-        logger.debug(f"匹配结果: {keyword}, {searched}")
+        logger.info(f"[parser-adapter] matched: keyword={keyword}, link={searched.group(0)}")
 
         # 仲裁机制
         if isinstance(event, AiocqhttpMessageEvent) and not event.is_private_chat():
