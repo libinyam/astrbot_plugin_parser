@@ -69,6 +69,12 @@ class DouyinParser(BaseParser):
         cookies = self.cookiejar.get(domain="iesdouyin.com") or {}
         return bool(cookies.get("ttwid"))
 
+    @staticmethod
+    def _is_douyin_home_url(url: str) -> bool:
+        parsed = urlparse(url)
+        hostname = parsed.hostname or ""
+        return hostname.endswith("douyin.com") and parsed.path.rstrip("/") == ""
+
     # https://v.douyin.com/_2ljF4AmKL8
     @handle("v.douyin", r"v\.douyin\.com/[a-zA-Z0-9_\-]+")
     @handle("jx.douyin", r"jx\.douyin\.com/[a-zA-Z0-9_\-]+")
@@ -193,7 +199,21 @@ class DouyinParser(BaseParser):
         if redirect_url == url:
             raise ParseException(f"无法重定向 URL: {url}")
 
-        keyword, searched = self.search_url(redirect_url)
+        try:
+            keyword, searched = self.search_url(redirect_url)
+        except ParseException as e:
+            if self._is_douyin_home_url(redirect_url):
+                logger.warning(f"[抖音] 短链只重定向到首页，无法解析具体作品: {url} -> {redirect_url}")
+                return self.result(
+                    title="短链无法解析",
+                    text=(
+                        "这个抖音短链没有跳转到具体作品地址，可能是链接已失效、"
+                        "被抖音风控，或分享内容不可公开访问。请重新复制分享链接，"
+                        "最好发送形如 https://www.douyin.com/video/数字ID 的完整链接。"
+                    ),
+                    url=url,
+                )
+            raise e
         return await self.parse(keyword, searched)
 
     async def parse_video(self, url: str):
