@@ -143,9 +143,12 @@ class ParserPlugin(Star):
 
         self_id = event.get_self_id()
 
-        # 指定机制：专门@其他bot的消息不解析
-        if isinstance(seg1, At) and str(seg1.qq) != self_id:
-            return
+        # 指定机制：专门@其他bot的消息不解析。
+        # QQ 官方机器人会把 @ 当前机器人记为 qq_official，不能按普通 QQ 号比较。
+        if isinstance(seg1, At):
+            at_target = str(seg1.qq)
+            if at_target != self_id and at_target.isdigit():
+                return
 
         # 核心匹配逻辑 ：关键词 + 正则双重判定，汇集了所有解析器的正则对。
         keyword: str = ""
