@@ -21,7 +21,7 @@ from .core.download import Downloader
 from .core.parsers import BaseParser, BilibiliParser
 from .core.render import Renderer
 from .core.sender import MessageSender
-from .core.utils import extract_json_url
+from .core.utils import collect_event_text, extract_json_url
 
 
 class ParserPlugin(Star):
@@ -129,12 +129,14 @@ class ParserPlugin(Star):
             return
 
         seg1 = chain[0]
-        text = event.message_str
+        text = collect_event_text(event, chain)
 
         # 卡片解析：解析Json组件，提取URL
         if isinstance(seg1, Json):
-            text = extract_json_url(seg1.data)
-            logger.debug(f"解析Json组件: {text}")
+            json_url = extract_json_url(seg1.data)
+            if json_url:
+                text = f"{json_url}\n{text}" if text else json_url
+                logger.debug(f"解析Json组件: {json_url}")
 
         if not text:
             return

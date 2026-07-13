@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import json
+import re
 from collections import OrderedDict
 from pathlib import Path
 from typing import Any, TypeVar
@@ -10,6 +11,8 @@ from astrbot.api import logger
 
 K = TypeVar("K")
 V = TypeVar("V")
+
+URL_RE = re.compile(r"https?://[^\s<>\"'`]+")
 
 
 class LimitedSizeDict(OrderedDict[K, V]):
@@ -209,6 +212,102 @@ def generate_file_name(url: str, default_suffix: str = "") -> str:
     return file_name
 
 
+
+def _clean_url(url: str) -> str:
+    return url.rstrip(".,;:!?)]}>")
+
+
+def _walk_strings(value: Any, *, depth: int = 0, seen: set[int] | None = None) -> list[str]:
+    if value is None or depth > 5:
+        return []
+
+    if seen is None:
+        seen = set()
+
+    if isinstance(value, str):
+        return [value]
+
+    if isinstance(value, bytes):
+        try:
+            return [value.decode("utf-8", errors="ignore")]
+        except Exception:
+            return []
+
+    if isinstance(value, dict):
+        obj_id = id(value)
+        if obj_id in seen:
+            return []
+        seen.add(obj_id)
+        parts: list[str] = []
+        for item in value.values():
+            parts.extend(_walk_strings(item, depth=depth + 1, seen=seen))
+        return parts
+
+    if isinstance(value, (list, tuple, set)):
+        parts: list[str] = []
+        for item in value:
+            parts.extend(_walk_strings(item, depth=depth + 1, seen=seen))
+        return parts
+
+    obj_id = id(value)
+    if obj_id in seen:
+        return []
+    seen.add(obj_id)
+
+    parts: list[str] = []
+    for attr in ("text", "data", "url", "content", "message", "raw_message", "payload"):
+        if hasattr(value, attr):
+            try:
+                parts.extend(_walk_strings(getattr(value, attr), depth=depth + 1, seen=seen))
+            except Exception:
+                continue
+    return parts
+
+
+def collect_event_text(event: Any, chain: list[Any]) -> str:
+    parts: list[str] = []
+
+    message_str = getattr(event, "message_str", "")
+    if message_str:
+        parts.append(message_str)
+
+    for seg in chain:
+        parts.extend(_walk_strings(seg))
+
+    message_obj = getattr(event, "message_obj", None)
+    for attr in ("raw_message", "message", "raw", "data"):
+        if message_obj is not None and hasattr(message_obj, attr):
+            try:
+                parts.extend(_walk_strings(getattr(message_obj, attr)))
+            except Exception:
+                continue
+
+    for attr in ("raw_message", "message", "raw", "data"):
+        if hasattr(event, attr):
+            try:
+                parts.extend(_walk_strings(getattr(event, attr)))
+            except Exception:
+                continue
+
+    seen: set[str] = set()
+    ordered: list[str] = []
+
+    # Put explicit URLs first so keyword/regex matching works even when the
+    # platform keeps the visible text and link target in different fields.
+    for part in parts:
+        for url in URL_RE.findall(part):
+            cleaned = _clean_url(url)
+            if cleaned and cleaned not in seen:
+                seen.add(cleaned)
+                ordered.append(cleaned)
+
+    for part in parts:
+        part = part.strip()
+        if part and part not in seen:
+            seen.add(part)
+            ordered.append(part)
+
+    return "\n".join(ordered)
 def extract_json_url(data: dict | str) -> str | None:
     """处理 JSON 类型的消息段，提取 URL
 
